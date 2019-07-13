@@ -1,0 +1,10 @@
+train_movies
+train_images
+
+*.h5
+*.pickle
+
+__pycache__
+.ipynb_checkpoints
+
+.DS_Store
