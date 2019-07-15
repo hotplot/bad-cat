@@ -14,7 +14,7 @@ ap.add_argument('-w', '--width', type=int, default=300)
 ap.add_argument('-h', '--height', type=int, default=300)
 ap.add_argument('-x', '--center_x', type=int, default=775)
 ap.add_argument('-y', '--center_y', type=int, default=335)
-ap.add_argument('-m', '--moving_threshold', type=int, default=30000)
+ap.add_argument('-m', '--moving_threshold', type=int, default=20000)
 ap.add_argument('-s', '--still_threshold', type=int, default=5000)
 
 args = vars(ap.parse_args())
