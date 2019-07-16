@@ -54,7 +54,12 @@ def main():
 
     stream_proc = mp.Process(
         target=stream_frames, 
-        args=(args['stream'], frame_queue, should_stop)
+        kwargs={
+            'url': args['stream'],
+            'roi_coords': (x1, x2, y1, y2),
+            'frame_queue': frame_queue,
+            'should_stop': should_stop
+        }
     )
 
     classify_proc = mp.Process(

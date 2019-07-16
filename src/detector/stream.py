@@ -2,7 +2,13 @@ import logging, traceback
 import cv2
 
 
-def stream_frames(url, frame_queue, should_stop):
+def display_frame(frame, roi_coords):
+    x1, x2, y1, y2 = roi_coords
+    frame = cv2.rectangle(frame, (x1,y1), (x2,y2), (0,0,0), 3)
+    cv2.imshow('Stream', frame)
+
+
+def stream_frames(url, roi_coords, frame_queue, should_stop):
     vc = cv2.VideoCapture(url)
     
     while not should_stop.is_set():
@@ -20,7 +26,7 @@ def stream_frames(url, frame_queue, should_stop):
         # Send the frame to the classifier and display it on screen
         if frame is not None:
             frame_queue.put(frame)
-            cv2.imshow('Stream', frame)
+            display_frame(frame, roi_coords)
 
         # Check for user quit command
         if cv2.waitKey(1) & 0xFF == ord('q'):
