@@ -14,14 +14,19 @@ def stream_frames(url, roi_coords, frame_queue, should_stop):
     while not should_stop.is_set():
         # Attempt to read the next frame from the stream, and reconnect if
         # there was an error
+        reconnect = False
+        frame = None
+
         try:
-            result, frame = vc.read()
+            _, frame = vc.read()
         except:
-            logging.warning('Reading stream failed')
             traceback.print_exc()
+            reconnect = True
+        
+        if reconnect or frame is None:
+            logging.warning('Reading stream failed; reconnecting')
             vc.release()
             vc = cv2.VideoCapture(url)
-            continue
         
         # Send the frame to the classifier and display it on screen
         if frame is not None:

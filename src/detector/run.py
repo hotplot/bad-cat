@@ -99,8 +99,20 @@ def main():
         classifier_started.wait(timeout=0.1)
     
     stream_proc.start()
-    
-    # Wait for the stream and classify processes to terminate
+
+    logging.info(f'Classifier PID: {classify_proc.pid}')
+    logging.info(f'Streamer PID: {stream_proc.pid}')
+    logging.info(f'Notifier PID: {notify_proc.pid}')
+
+    # Monitor the processes and exit if one of them crashes
+    while not should_stop.is_set():
+        should_stop.wait(timeout=0.1)
+        for proc in [stream_proc, classify_proc, notify_proc]:
+            if not proc.is_alive() and not should_stop.is_set():
+                logging.error(f'Process {proc.pid} crashed; exiting')
+                should_stop.set()
+
+    # Wait for the various processes to terminate
     stream_proc.join()
     classify_proc.join()
     notify_proc.join()
