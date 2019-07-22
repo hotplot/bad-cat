@@ -6,7 +6,7 @@ import numpy as np
 
 
 def preprocess(frame, image_size, roi_coords):
-    (x1, x2, y1, y2) = roi_coords
+    x1, y1, x2, y2 = roi_coords
     roi = frame[y1:y2, x1:x2]
     roi = cv2.resize(roi, image_size)
     X = roi.reshape(1, *roi.shape)

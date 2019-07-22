@@ -31,14 +31,19 @@ def parse_args():
     return vars(ap.parse_args())
 
 
-def main():
-    args = parse_args()
-
-    # Compute the coordinates of the region of interest
+def compute_roi_coords(args):
     x1 = args['center_x'] - args['roi_width']//2
     y1 = args['center_y'] - args['roi_height']//2
     x2 = x1 + args['roi_width']
     y2 = y1 + args['roi_height']
+    return (x1, y1, x2, y2)
+
+
+def main():
+    args = parse_args()
+
+    # Compute the coordinates of the region of interest
+    roi_coords = compute_roi_coords(args)
 
     # Determine class labels
     class_names = sorted(glob.glob('train_images/*'))
@@ -56,7 +61,7 @@ def main():
         target=stream_frames, 
         kwargs={
             'url': args['stream'],
-            'roi_coords': (x1, x2, y1, y2),
+            'roi_coords': roi_coords,
             'frame_queue': frame_queue,
             'should_stop': should_stop
         }
@@ -68,7 +73,7 @@ def main():
             'model_path': args['model'],
             'labels': labels,
             'image_size': (args['model_width'], args['model_height']),
-            'roi_coords': (x1, x2, y1, y2),
+            'roi_coords': roi_coords,
             'frame_queue': frame_queue,
             'has_started': classifier_started,
             'should_stop': should_stop,

@@ -3,7 +3,7 @@ import cv2
 
 
 def display_frame(frame, roi_coords):
-    x1, x2, y1, y2 = roi_coords
+    x1, y1, x2, y2 = roi_coords
     frame = cv2.rectangle(frame, (x1,y1), (x2,y2), (0,0,0), 3)
     cv2.imshow('Stream', frame)
 
