@@ -10,12 +10,12 @@ from frameselector import FrameSelector
 ap = argparse.ArgumentParser(add_help=False)
 ap.add_argument('-i', '--input', default='train_movies')
 ap.add_argument('-o', '--output', default='train_images')
-ap.add_argument('-w', '--width', type=int, default=300)
-ap.add_argument('-h', '--height', type=int, default=300)
-ap.add_argument('-x', '--center_x', type=int, default=775)
-ap.add_argument('-y', '--center_y', type=int, default=335)
-ap.add_argument('-m', '--moving_threshold', type=int, default=20000)
-ap.add_argument('-s', '--still_threshold', type=int, default=5000)
+ap.add_argument('-w', '--width', type=int, default=600)
+ap.add_argument('-h', '--height', type=int, default=600)
+ap.add_argument('-x', '--center_x', type=int, default=750)
+ap.add_argument('-y', '--center_y', type=int, default=300)
+ap.add_argument('-m', '--moving_threshold', type=float, default=0.25)
+ap.add_argument('-s', '--still_threshold', type=float, default=0.05)
 
 args = vars(ap.parse_args())
 
@@ -57,15 +57,20 @@ def matches_in(path, glob_str):
 
 
 def roi_movement(base_roi, roi):
+    # Find the number of pixels that differ significantly from the base image
     delta = cv2.absdiff(base_roi, roi)
     thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
     thresh = cv2.dilate(thresh, None, iterations=2)
-    _, contours, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    _, contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     area = sum([cv2.contourArea(c) for c in contours])
 
-    if area > args['moving_threshold']:
+    # Determine what percentage of the image is moving
+    moving_proportion = area / (roi.shape[0] * roi.shape[1])
+
+    # Classify the amount of movement in the ROI
+    if moving_proportion > args['moving_threshold']:
         return 'lots'
-    if area > args['still_threshold']:
+    if moving_proportion > args['still_threshold']:
         return 'some'
     else:
         return 'none'
@@ -89,7 +94,7 @@ def process_video(path):
     base_roi = preprocess(base_frame[startY:finishY, startX:finishX])
 
     # Compute the base output path to use when saving frames
-    category = path.split(os.sep)[1]
+    category = path.split(os.sep)[-2]
     filename = os.path.splitext(os.path.basename(path))[0]
     base_output_path = os.path.join(args['output'], category, filename)
 
