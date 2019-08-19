@@ -10,12 +10,12 @@ from frameselector import FrameSelector
 ap = argparse.ArgumentParser(add_help=False)
 ap.add_argument('-i', '--input', default='train_movies')
 ap.add_argument('-o', '--output', default='train_images')
-ap.add_argument('-w', '--width', type=int, default=600)
-ap.add_argument('-h', '--height', type=int, default=600)
-ap.add_argument('-x', '--center_x', type=int, default=750)
-ap.add_argument('-y', '--center_y', type=int, default=300)
-ap.add_argument('-m', '--moving_threshold', type=float, default=0.25)
-ap.add_argument('-s', '--still_threshold', type=float, default=0.05)
+ap.add_argument('-m', '--moving_threshold', type=float, default=0.15)
+ap.add_argument('-s', '--still_threshold', type=float, default=0.025)
+ap.add_argument('--roi_x', type=int, default=160, help='the top-left X coordinate of the ROI')
+ap.add_argument('--roi_y', type=int, default=0, help='the top-left Y coordinate of the ROI')
+ap.add_argument('--roi_width', type=int, default=800, help='the width of the ROI')
+ap.add_argument('--roi_height', type=int, default=720, help='the height of the ROI')
 
 args = vars(ap.parse_args())
 
@@ -78,10 +78,10 @@ def roi_movement(base_roi, roi):
 
 def process_video(path):
     # Compute the coordinates of the region of interest
-    startX = args['center_x'] - args['width']//2
-    finishX = startX + args['width']
-    startY = args['center_y'] - args['height']//2
-    finishY = startY + args['height']
+    x1 = args['roi_x']
+    x2 = x1 + args['roi_width']
+    y1 = args['roi_y']
+    y2 = y1 + args['roi_height']
 
     # Helper function to preprocess images for motion detection
     def preprocess(image):
@@ -91,7 +91,7 @@ def process_video(path):
 
     # Prompt for a 'base' frame containing no object
     base_frame = get_reference_frame(path)
-    base_roi = preprocess(base_frame[startY:finishY, startX:finishX])
+    base_roi = preprocess(base_frame[y1:y2, x1:x2])
 
     # Compute the base output path to use when saving frames
     category = path.split(os.sep)[-2]
@@ -112,7 +112,7 @@ def process_video(path):
         if ret is False or frame is None:
             break
         
-        roi = frame[startY:finishY, startX:finishX]
+        roi = frame[y1:y2, x1:x2]
         preprocessed_roi = preprocess(roi)
 
         # Check how much movement occurs in this frame, and save the ROI

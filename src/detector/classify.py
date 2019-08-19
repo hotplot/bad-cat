@@ -1,17 +1,10 @@
 import collections, logging, queue, time
+import datetime
 
-import cv2
 import keras
 import numpy as np
 
-
-def preprocess(frame, image_size, roi_coords):
-    x1, y1, x2, y2 = roi_coords
-    roi = frame[y1:y2, x1:x2]
-    roi = cv2.resize(roi, image_size)
-    X = roi.reshape(1, *roi.shape)
-    X = keras.applications.mobilenet_v2.preprocess_input(X)
-    return X
+from tensorflow.lite.python.interpreter import Interpreter
 
 
 def drain(frame_queue):
@@ -28,14 +21,19 @@ def drain(frame_queue):
     return object, num_discarded
 
 
-def classify_frames(model_path, labels, image_size, roi_coords, frame_queue, has_started, should_stop, black_cat_detected):
+def classify_frames(model_path, predictions_to_avg, labels, frame_queue, has_started, should_stop, any_cat_detected, bad_cat_detected):
     # Load the model, then signal that the classifier has started
-    model = keras.models.load_model(model_path)
+    interpreter = Interpreter(model_path)
+    interpreter.allocate_tensors()
+
+    input_tensor_index = interpreter.get_input_details()[0]['index']
+    output_tensor_index = interpreter.get_output_details()[0]['index']
+
     has_started.set()
 
     # Set up class state tracking
     current_class = None
-    ys = collections.deque(maxlen=2*23)
+    ys = collections.deque(maxlen=predictions_to_avg)
 
     # Loop over the supplied frames and process detections
     while not should_stop.is_set():
@@ -46,10 +44,14 @@ def classify_frames(model_path, labels, image_size, roi_coords, frame_queue, has
             time.sleep(1.0 / 25.0)
             continue
         
-        # Crop and process the frame, run the classifier and add the result to the
-        # set of recent predictions
-        X = preprocess(frame, image_size, roi_coords)
-        y = model.predict(X)[0]
+        # Run the classifier and add the result to the set of recent predictions
+        X = np.reshape(frame, (1, *frame.shape))
+        X = keras.applications.mobilenet_v2.preprocess_input(X)
+        
+        interpreter.set_tensor(input_tensor_index, X)
+        interpreter.invoke()
+
+        y = interpreter.get_tensor(output_tensor_index)[0]
         ys.append(y)
 
         # Determine the most likely class from the average of the predictions over
@@ -57,6 +59,16 @@ def classify_frames(model_path, labels, image_size, roi_coords, frame_queue, has
         predicted_class = np.mean(ys, axis=0).argmax()
         if predicted_class != current_class:
             current_class = predicted_class
+            
+            print(f'{datetime.datetime.now().strftime("%X")}: Detected class changed to {labels[current_class]}')
             logging.info(f'Detected class changed to {labels[current_class]}')
+            
+            # Notify if any cats have been detected
+            if labels[predicted_class] == 'none':
+                any_cat_detected.clear()
+            else:
+                any_cat_detected.set()
+
+            # Notify if a bad cat has been detected
             if labels[predicted_class] == 'black-cat':
-                black_cat_detected.set()
+                bad_cat_detected.set()

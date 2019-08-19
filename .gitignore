@@ -2,6 +2,7 @@ train_movies
 train_images
 
 *.h5
+*.tflite
 *.pickle
 
 __pycache__
