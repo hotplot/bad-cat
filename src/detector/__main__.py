@@ -1,8 +1,8 @@
 import argparse, collections, datetime, glob, logging, os, pickle, time, traceback
 import multiprocessing as mp
 
-from classify import classify_frames
-from capture import capture_frames
+from .classify import classify_frames
+from .capture import capture_frames
 
 
 logging.basicConfig(format='[%(levelname)s] %(asctime)s: %(message)s', level=logging.INFO)
@@ -19,14 +19,11 @@ def parse_args():
     ap.add_argument('--video_width', type=int, default=1280, help='the camera horizontal video resolution')
     ap.add_argument('--video_height', type=int, default=720, help='the camera vertical video resolution')
     ap.add_argument('--framerate', type=int, default=5, help='the rate at which to classify frames')
-    ap.add_argument('--model_width', type=int, default=224, help='the model input width')
-    ap.add_argument('--model_height', type=int, default=224, help='the model input height')
     return vars(ap.parse_args())
 
 
 def main():
     args = parse_args()
-    logging.warning('A warning')
 
     # Compute the coordinates of the region of interest
     roi = {
@@ -42,22 +39,21 @@ def main():
 
     # Setup processes
 
-    any_cat_detected = mp.Event()
+    motion_detected = mp.Event()
     bad_cat_detected = mp.Event()
     classifier_started = mp.Event()
+    classification_queue = mp.Queue()
     should_stop = mp.Event()
-    frame_queue = mp.Queue()
 
     capture_proc = mp.Process(
         target=capture_frames, 
         kwargs={
             'roi': roi,
             'capture_size': (args['video_width'], args['video_height']),
-            'target_size': (args['model_width'], args['model_height']),
             'classification_interval': 1.0 / args['framerate'],
-            'frame_queue': frame_queue,
+            'classification_queue': classification_queue,
             'should_stop': should_stop,
-            'cat_detected': any_cat_detected
+            'motion_detected': motion_detected
         }
     )
 
@@ -67,10 +63,10 @@ def main():
             'model_path': args['model'],
             'predictions_to_avg': 2 * args['framerate'],
             'labels': labels,
-            'frame_queue': frame_queue,
+            'classification_queue': classification_queue,
             'has_started': classifier_started,
             'should_stop': should_stop,
-            'any_cat_detected': any_cat_detected,
+            'motion_detected': motion_detected,
             'bad_cat_detected': bad_cat_detected
         }
     )
