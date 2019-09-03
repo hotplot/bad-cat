@@ -1,6 +1,7 @@
 import argparse, collections, datetime, glob, os, pickle, time, traceback
 
 import cv2
+import keras
 import numpy as np
 
 from tensorflow.contrib.lite.python.interpreter import Interpreter
@@ -13,7 +14,7 @@ def parse_args():
     ap.add_argument('--video', required=True, help='')
     ap.add_argument('--model', required=True, help='the tflite model to use for classification')
     ap.add_argument('--labels', required=True, help='the pickled labels file')
-    ap.add_argument('--nth', type=int, default=5, help='only consider every Nth frame')
+    ap.add_argument('--nth', type=int, default=4, help='only consider every Nth frame')
     ap.add_argument('--roi_x', type=int, default=160, help='the top-left X coordinate of the ROI')
     ap.add_argument('--roi_y', type=int, default=0, help='the top-left Y coordinate of the ROI')
     ap.add_argument('--roi_width', type=int, default=800, help='the width of the ROI')
@@ -47,8 +48,7 @@ def main():
 
     # Open the video and process each frame
     index = 0
-    processed_prev_roi = None
-    ys = collections.deque(maxlen=10)
+    ys = collections.deque(maxlen=15)
 
     vc = cv2.VideoCapture(args['video'])
     while vc.isOpened():
@@ -62,21 +62,12 @@ def main():
             continue
 
         # Preprocess the full size frame
-        if processed_prev_roi is None:
-            _, processed_prev_roi = preprocess(frame, roi_coords)
-            continue
-        
-        curr_roi, processed_curr_roi = preprocess(frame, roi_coords)
-
-        # Form a complex hull around the movement in the frame,
-        # and extract a histogram of foreground colors vs background colors.
-        hull, hull_proportion = extract_hull(processed_curr_roi, processed_prev_roi)
-        fg_hist, bg_hist = extract_histograms(curr_roi, hull)
+        curr_roi, _ = preprocess(frame, roi_coords)
 
         # Run the classifier and add the result to the set of recent predictions
-        X = np.hstack((hull_proportion, fg_hist, bg_hist))
+        X = cv2.cvtColor(curr_roi, cv2.COLOR_GRAY2BGR)
         X = np.reshape(X, (1, *X.shape))
-        X = np.array(X, dtype=np.float32)
+        X = keras.applications.mobilenet_v2.preprocess_input(X)
         
         interpreter.set_tensor(input_tensor_index, X)
         interpreter.invoke()
@@ -95,8 +86,6 @@ def main():
         curr_roi = cv2.cvtColor(curr_roi, cv2.COLOR_GRAY2BGR)
         curr_roi = cv2.putText(curr_roi, f'{class_name}: {100*y.max():0.2f}%', (25,25), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0,0,255))
         curr_roi = cv2.putText(curr_roi, f'{avg_class_name}: {100*np.mean(ys, axis=0).max():0.2f}%', (25,200), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0,0,255))
-        if hull is not None:
-            curr_roi = cv2.drawContours(curr_roi, [hull], 0, (0,0,255), 1)
 
         cv2.imshow('Prediction', curr_roi)
         if cv2.waitKey(0) == ord('q'):
@@ -104,7 +93,6 @@ def main():
 
         # Book keeping for next frame
         index += 1
-        processed_prev_roi = processed_curr_roi
 
     vc.release()
 

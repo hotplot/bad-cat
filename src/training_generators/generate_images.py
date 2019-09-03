@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 from .frameselector import FrameSelector
-from ..utils import preprocess
+from ..utils import preprocess, extract_hull, display_preview
 
 
 def parse_args():
@@ -17,28 +17,31 @@ def parse_args():
     ap.add_argument('--roi_y', type=int, default=0, help='the top-left Y coordinate of the ROI')
     ap.add_argument('--roi_width', type=int, default=800, help='the width of the ROI')
     ap.add_argument('--roi_height', type=int, default=720, help='the height of the ROI')
+    ap.add_argument('--preview', action='store_true', help='show a preview of extracted data')    
     return vars(ap.parse_args())
 
 
-def get_reference_frame(path, ref_frame_indexes):
-    # If a reference frame index has already been stored for this video,
-    # load and return that frame
-    if path in ref_frame_indexes:
-        vc = cv2.VideoCapture(path)
-        vc.set(cv2.CAP_PROP_POS_FRAMES, ref_frame_indexes[path])
-        _, frame = vc.read()
-        return frame
-    
-    # No reference frame is known, so prompt the user to select one
-    selector = FrameSelector(path)
-    index, frame = selector.select_frame()
+def get_reference_frame(path, ref_frame_indexes, roi_coords):
+    # If no reference frame is known, prompt the user to select one
+    if not path in ref_frame_indexes:
+        selector = FrameSelector(path, roi_coords)
+        index, frame = selector.select_frame()
 
-    # Store the reference frame index
-    ref_frame_indexes[path] = index
-    with open('ref_frame_indexes.pickle', 'wb') as f:
-        pickle.dump(ref_frame_indexes, f)
+        # Store the reference frame index
+        ref_frame_indexes[path] = index
+        with open('ref_frame_indexes.pickle', 'wb') as f:
+            pickle.dump(ref_frame_indexes, f)
     
-    return frame
+    # Load and return the reference frame for this video
+    # An index of -1 indicates that all frames contain the object we want to detect.
+    if path in ref_frame_indexes:
+        if ref_frame_indexes[path] == -1:
+            return None
+        else:
+            vc = cv2.VideoCapture(path)
+            vc.set(cv2.CAP_PROP_POS_FRAMES, ref_frame_indexes[path])
+            _, frame = vc.read()
+            return frame
 
 
 def save_image(path, image):
@@ -47,27 +50,7 @@ def save_image(path, image):
     cv2.imwrite(path, image)
 
 
-def roi_movement(base_roi, roi, moving_thresh, still_thresh):
-    # Find the number of pixels that differ significantly from the base image
-    delta = cv2.absdiff(base_roi, roi)
-    thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
-    thresh = cv2.dilate(thresh, None, iterations=2)
-    _, contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    area = sum([cv2.contourArea(c) for c in contours])
-
-    # Determine what percentage of the image is moving
-    moving_proportion = area / (roi.shape[0] * roi.shape[1])
-
-    # Classify the amount of movement in the ROI
-    if moving_proportion > moving_thresh:
-        return 'lots'
-    if moving_proportion > still_thresh:
-        return 'some'
-    else:
-        return 'none'
-
-
-def process_video(path, output_dir, ref_roi, roi_coords, moving_thresh, still_thresh):
+def process_video(path, output_dir, ref_roi, roi_coords, moving_thresh, still_thresh, show_preview):
     # Compute the base output path to use when saving frames
     category = path.split(os.sep)[-2]
     filename = os.path.splitext(os.path.basename(path))[0]
@@ -86,17 +69,28 @@ def process_video(path, output_dir, ref_roi, roi_coords, moving_thresh, still_th
         if ret is False or frame is None:
             break
         
-        roi, preprocessed_roi = preprocess(frame, roi_coords)
+        # Preprocess the frame
+        curr_roi, processed_curr_roi = preprocess(frame, roi_coords)
+
+        # Form a complex hull around the movement in the frame,
+        # and choose a category based on the magnitude of the movement.
+        # If the reference ROI is None, all frames are assumed to contain movement.
+        hull, hull_proportion = (None, 0)
+        if ref_roi is not None:
+            hull, hull_proportion = extract_hull(processed_curr_roi, ref_roi)
 
         # Check how much movement occurs in this frame, and save the ROI
-        movement_level = roi_movement(ref_roi, preprocessed_roi, moving_thresh, still_thresh)
-        if movement_level == 'lots':
+        if ref_roi is None or hull_proportion > moving_thresh:
             output_path = os.path.join(output_dir, category, f'{filename}-{index}.jpg')
-            save_image(output_path, roi)
+            save_image(output_path, curr_roi)
             num_moving_frames += 1
-        elif movement_level == 'none':
-            stationary_frames.append(roi)
-        
+        elif hull_proportion < still_thresh:
+            stationary_frames.append(curr_roi)
+
+        if show_preview:
+            display_preview(curr_roi, hull, hull_proportion)
+
+        # Book keeping
         index += 1
     
     # Save the frames where no movement occurred, but only enough to equal the number of 
@@ -133,16 +127,22 @@ def main():
         pass
 
     # Loop over and process each training video
-    for path in glob.glob(os.path.join(args['input'], '**/*.mp4')):
-        ref_frame = get_reference_frame(path, ref_frame_indexes)
-        _, ref_roi = preprocess(ref_frame, roi_coords)
+    paths = sorted(glob.glob(os.path.join(args['input'], '**/*.mp4')))
+    for path in paths:
+        ref_frame = get_reference_frame(path, ref_frame_indexes, roi_coords)
+        if ref_frame is not None:
+            _, ref_roi = preprocess(ref_frame, roi_coords)
+        else:
+            ref_roi = None
+        
         process_video(
             path,
             args['output'],
             ref_roi,
             roi_coords,
             args['moving_threshold'],
-            args['still_threshold']
+            args['still_threshold'],
+            args['preview']
         )
 
 

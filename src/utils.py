@@ -1,3 +1,5 @@
+import datetime, sys
+
 import cv2
 import numpy as np
 
@@ -11,7 +13,7 @@ def preprocess(frame, roi_coords):
     roi = frame[y1:y2, x1:x2]
     roi = cv2.resize(roi, (224, 224))
     roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    processed_roi = cv2.GaussianBlur(roi, (7, 7), 0)
+    processed_roi = cv2.GaussianBlur(roi, (13, 13), 0)
     processed_roi = cv2.equalizeHist(processed_roi)
     return roi, processed_roi
 
@@ -25,7 +27,7 @@ def extract_hull(curr_roi, prev_roi):
 
     # Find the regions that differ significantly from the previous ROI
     delta = cv2.absdiff(curr_roi, prev_roi)
-    _, thresh = cv2.threshold(delta, 20, 255, cv2.THRESH_BINARY)
+    _, thresh = cv2.threshold(delta, 64, 255, cv2.THRESH_BINARY)
     _, contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours = list(filter(lambda c: cv2.contourArea(c) > 50, contours))
 
@@ -67,3 +69,27 @@ def extract_histograms(roi, hull):
         bg_hist = bg_hist / np.max(bg_hist)
 
     return fg_hist, bg_hist
+
+
+def display_preview(roi, hull, hull_proportion):
+    output = cv2.cvtColor(roi, cv2.COLOR_GRAY2BGR)
+    output = cv2.putText(output, f'Hull proportion: {hull_proportion}', (5,25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255))
+    if hull is not None:
+        output = cv2.drawContours(output.copy(), [hull], -1, (0,0,255))
+    cv2.imshow('Output', output)
+    if cv2.waitKey(0) == ord('q'):
+        exit()
+
+
+def __log(message, level, stream):
+    time_str = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+    stream.write(f'[{level}] {time_str}: {message}\n')
+    stream.flush()
+
+
+def log_info(message):
+    __log(message, 'INFO', sys.stdout)
+
+
+def log_error(message):
+    __log(message, 'ERROR', sys.stderr)

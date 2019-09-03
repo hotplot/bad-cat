@@ -1,37 +1,29 @@
-import datetime, logging, time, traceback
+import datetime, threading, time, os
 
 import cv2
+import keras
 import numpy as np
 import picamera
 
-from ..utils import preprocess, extract_hull, extract_histograms
+from ..utils import preprocess, extract_hull, log_info
 
 
-def __process_frame(frame, prev_roi, crop_coords, classification_queue):
-    """Extracts the fore and background histograms from the current frame and sends
-    them to the classifier"""
+def __process_frame(frame, crop_coords, classification_queue):
+    """Extracts and preprocesses the ROI from the current frame and sends it to the classifier."""
 
     # Preprocess the current frame
-    _, curr_roi = preprocess(frame, crop_coords)
-
-    # If we don't have a previous ROI, there is nothing more to do
-    if prev_roi is None:
-        return curr_roi
-
-    # Extract the hull surrounding the movement in the ROI, if there is any,
-    # and compute foreground/background histograms
-    hull, hull_proportion = extract_hull(curr_roi, prev_roi)
-    fg_hist, bg_hist = extract_histograms(curr_roi, hull)
+    curr_roi, _ = preprocess(frame, crop_coords)
 
     # Create the input tensor and send it to the classifier
-    X = np.hstack((hull_proportion, fg_hist, bg_hist))
+    X = cv2.cvtColor(curr_roi, cv2.COLOR_GRAY2BGR)
+    X = np.reshape(X, (1, *X.shape))
+    X = keras.applications.mobilenet_v2.preprocess_input(X)
+
     classification_queue.put(X)
 
-    return curr_roi
 
-
-def capture_frames(roi, capture_size, classification_interval, classification_queue, should_stop, motion_detected):
-    """Starts streaming from the RPi camera and forwards processed histograms
+def __capture_frames(roi, capture_size, classification_interval, classification_queue, should_stop, predictions, labels, output_dir):
+    """Starts streaming from the RPi camera and forwards processed images
     to the classifier via `classification_queue` until `should_stop` is set."""
 
     crop_coords = (
@@ -50,30 +42,46 @@ def capture_frames(roi, capture_size, classification_interval, classification_qu
         camera.start_recording(buffer, format='h264', intra_period=19, sps_timing=True)
 
         # Begin continuously capturing and sending frames to the classifier
-        next_capture_time = time.time()
-        next_store_time = None
+        next_frame_time = time.time()
+        event_storage_timer = None
 
-        prev_roi = None
-        output = np.zeros((*capture_size, 3), dtype=np.uint8)
+        output = np.zeros((capture_size[0] * capture_size[1] * 3), dtype=np.uint8)
 
         for frame in camera.capture_continuous(output, format='bgr', use_video_port=True):
             # Process the current frame
-            prev_roi = __process_frame(frame, prev_roi, crop_coords, classification_queue)
+            output = np.reshape(output, (capture_size[1], capture_size[0], 3))
+            __process_frame(output, crop_coords, classification_queue)
 
-            # Check whether we should exit, or need to save event footage
+            # Exit if requested
             if should_stop.is_set():
                 break
 
-            if next_store_time is None and motion_detected.is_set():
-                next_store_time = time.time() + 10.0
-            elif next_store_time is not None and time.time() >= next_store_time:
-                filename = datetime.datetime.now().strftime('%Y%m%d-%H%M%S.h264')
-                buffer.copy_to(filename)
-                next_store_time = None
+            # Check whether there has been a motion event worth saving
+            class_predictions = zip(predictions, labels)
+            best_prediction = sorted(class_predictions)[-1]
+            probability, predicted_class = best_prediction
+
+            if output_dir is not None:
+                if event_storage_timer is None and predicted_class != 'none' and probability > 0.85:
+                    date_str = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+                    path = os.path.join(output_dir, f'{date_str}-{predicted_class}.h264')
+                    event_storage_timer = threading.Timer(20.0, lambda: buffer.copy_to(path))
+                    event_storage_timer.start()
+                elif event_storage_timer and not event_storage_timer.is_alive() and predicted_class == 'none':
+                    event_storage_timer = None
             
             # Sleep until approximately when the next frame is due to be captured
-            next_capture_time += classification_interval
-            sleep_duration = max(0, next_capture_time - time.time())
-            time.sleep(sleep_duration)
+            curr_time = time.time()
+            next_frame_time = max(next_frame_time + classification_interval, curr_time)
+            time.sleep(next_frame_time - curr_time)
     
-        camera.stop_recording()                          
+        camera.stop_recording()
+        classification_queue.cancel_join_thread()
+
+
+def start_capturing(**kwargs):
+    should_stop = kwargs['should_stop']
+    try:
+        __capture_frames(**kwargs)
+    except KeyboardInterrupt:
+        should_stop.set()

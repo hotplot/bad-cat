@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from ..utils import preprocess, extract_hull, extract_histograms
+from ..utils import preprocess, extract_hull, extract_histograms, display_preview
 
 
 def parse_args():
@@ -72,12 +72,7 @@ def process_video(path, roi_coords, nth_frame, show_preview):
         processed_prev_roi = processed_curr_roi
 
         if show_preview:
-            curr_roi = cv2.putText(curr_roi, hist_label, (25,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, 0)
-            if hull is not None:
-                curr_roi = cv2.drawContours(curr_roi, [hull], -1, 0, 2)
-            cv2.imshow('ROI', curr_roi)
-            if cv2.waitKey(0) == ord('q'):
-                exit()
+            display_preview(curr_roi, hull, hull_proportion)
 
     vc.release()
 
@@ -100,7 +95,9 @@ def main():
 
     # Loop over and process each training video
     histograms_df = pd.DataFrame()
-    for path in glob.glob(os.path.join(args['input'], '**/*.mp4')):
+
+    paths = sorted(glob.glob(os.path.join(args['input'], '**/*.mp4')))
+    for path in paths:
         video_df = process_video(path, roi_coords, args['nth'], args['preview'])
         histograms_df = histograms_df.append(video_df, ignore_index=True)
     
