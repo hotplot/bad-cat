@@ -8,15 +8,11 @@ The neighbors cat kept stealing our cat food. Many low-tech solutions for keepin
 
 ## Does it Work?
 
-Version 1 certainly did:
+Yes it does:
 
 ![Bad cat being repelled](media/bad-cat.gif)
 
-Note that the cat exits the frame at approximately 35 km/h, and only visited twice before deciding our food just wasn't worth the effort. Our own cat was able to come and go freely without being squirted.
-
-Unfortunately, version 1 was held together using duct tape and chilly bins and eventually needed to be replaced by something more robust and weatherproof. As part of that upgrade the classifier was modified to use Tensorflow Lite running on a Raspberry Pi with the NoIR Raspberry Pi camera. The image quality from the NoIR camera is poor, and so far has not been good enough for reliable image classification. I am hopeful that with some careful image preprocessing, or a slightly better Raspberry Pi camera, this issue can be resolved in the future.
-
-An alternative approach using histogram classification has also been explored. While this does work, it is more easily fooled by unusual inputs and increases the risk that a human will get squirted beyond acceptable levels.
+Their cat only visited twice before deciding our food just wasn't worth the effort. Our own cat is able to come and go freely without being squirted.
 
 ## What's in the Repository?
 
