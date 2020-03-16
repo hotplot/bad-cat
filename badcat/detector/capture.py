@@ -5,17 +5,18 @@ import keras
 import numpy as np
 import picamera
 
-from ..utils import preprocess, extract_hull, log_info
+from ..utils import extract_roi, preprocess_roi, extract_hull, log_info
 
 
 def __process_frame(frame, crop_coords, classification_queue):
     """Extracts and preprocesses the ROI from the current frame and sends it to the classifier."""
 
     # Preprocess the current frame
-    curr_roi, _ = preprocess(frame, crop_coords)
+    roi = extract_roi(frame, crop_coords)
+    roi, _ = preprocess_roi(roi)
 
     # Create the input tensor and send it to the classifier
-    X = cv2.cvtColor(curr_roi, cv2.COLOR_GRAY2BGR)
+    X = cv2.cvtColor(roi, cv2.COLOR_GRAY2BGR)
     X = np.reshape(X, (1, *X.shape))
     X = keras.applications.mobilenet_v2.preprocess_input(X)
 

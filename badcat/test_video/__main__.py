@@ -6,7 +6,7 @@ import numpy as np
 
 from tensorflow.contrib.lite.python.interpreter import Interpreter
 
-from ..utils import preprocess, extract_hull, extract_histograms
+from ..utils import extract_roi, preprocess_roi, extract_hull, extract_histograms
 
 
 def parse_args():
@@ -62,7 +62,8 @@ def main():
             continue
 
         # Preprocess the full size frame
-        curr_roi, _ = preprocess(frame, roi_coords)
+        curr_roi = extract_roi(frame, roi_coords)
+        curr_roi, _ = preprocess_roi(curr_roi)
 
         # Run the classifier and add the result to the set of recent predictions
         X = cv2.cvtColor(curr_roi, cv2.COLOR_GRAY2BGR)

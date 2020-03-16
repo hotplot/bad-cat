@@ -3,8 +3,7 @@ import argparse, glob, os.path, pickle
 import cv2
 import numpy as np
 
-from .frameselector import FrameSelector
-from ..utils import preprocess, extract_hull, display_preview
+from .utils import extract_roi, preprocess_roi, extract_hull, display_preview
 
 
 def parse_args():
@@ -21,71 +20,50 @@ def parse_args():
     return vars(ap.parse_args())
 
 
-def get_reference_frame(path, ref_frame_indexes, roi_coords):
-    # If no reference frame is known, prompt the user to select one
-    if not path in ref_frame_indexes:
-        selector = FrameSelector(path, roi_coords)
-        index, frame = selector.select_frame()
-
-        # Store the reference frame index
-        ref_frame_indexes[path] = index
-        with open('ref_frame_indexes.pickle', 'wb') as f:
-            pickle.dump(ref_frame_indexes, f)
-    
-    # Load and return the reference frame for this video
-    # An index of -1 indicates that all frames contain the object we want to detect.
-    if path in ref_frame_indexes:
-        if ref_frame_indexes[path] == -1:
-            return None
-        else:
-            vc = cv2.VideoCapture(path)
-            vc.set(cv2.CAP_PROP_POS_FRAMES, ref_frame_indexes[path])
-            _, frame = vc.read()
-            return frame
-
-
 def save_image(path, image):
     folder = os.path.split(path)[0]
     os.makedirs(folder, exist_ok=True)
     cv2.imwrite(path, image)
 
 
-def process_video(path, output_dir, ref_roi, roi_coords, moving_thresh, still_thresh, show_preview):
+def process_video(path, output_dir, avg_roi, roi_coords, moving_thresh, still_thresh, show_preview):
     # Compute the base output path to use when saving frames
     category = path.split(os.sep)[-2]
     filename = os.path.splitext(os.path.basename(path))[0]
 
-    # Open the video and process each frame
-    vc = cv2.VideoCapture(path)
+    # Pre-process the averaged ROI
+    avg_roi = cv2.resize(avg_roi, (224, 224))
+    avg_roi = cv2.cvtColor(avg_roi, cv2.COLOR_BGR2GRAY)
+    avg_roi = cv2.GaussianBlur(avg_roi, (13, 13), 0)
+    avg_roi = cv2.equalizeHist(avg_roi)
 
+    # Open the video and process each frame
     index = 0
 
-    num_moving_frames = 0
-    stationary_frames = []
+    num_occupied_frames = 0
+    empty_frames = []
     
+    vc = cv2.VideoCapture(path)
     while vc.isOpened():
-        # Read the frame and crop out the ROI
+        # Read the next frame
         ret, frame = vc.read()
         if ret is False or frame is None:
             break
         
         # Preprocess the frame
-        curr_roi, processed_curr_roi = preprocess(frame, roi_coords)
+        curr_roi = extract_roi(frame, roi_coords)
+        curr_roi, processed_curr_roi = preprocess_roi(curr_roi)
 
-        # Form a complex hull around the movement in the frame,
-        # and choose a category based on the magnitude of the movement.
-        # If the reference ROI is None, all frames are assumed to contain movement.
-        hull, hull_proportion = (None, 0)
-        if ref_roi is not None:
-            hull, hull_proportion = extract_hull(processed_curr_roi, ref_roi)
+        # Form a complex hull around the movement in the frame
+        hull, hull_proportion = extract_hull(processed_curr_roi, avg_roi)
 
         # Check how much movement occurs in this frame, and save the ROI
-        if ref_roi is None or hull_proportion > moving_thresh:
+        if hull_proportion > moving_thresh:
             output_path = os.path.join(output_dir, category, f'{filename}-{index}.jpg')
             save_image(output_path, curr_roi)
-            num_moving_frames += 1
+            num_occupied_frames += 1
         elif hull_proportion < still_thresh:
-            stationary_frames.append(curr_roi)
+            empty_frames.append(curr_roi)
 
         if show_preview:
             display_preview(curr_roi, hull, hull_proportion)
@@ -98,13 +76,38 @@ def process_video(path, output_dir, ref_roi, roi_coords, moving_thresh, still_th
     # Normally there are far more still frames than moving frames, and saving them all 
     # results in significantly unbalanced class sizes.
     num_saved = 0
-    while num_saved < num_moving_frames and num_saved < len(stationary_frames):
+    while num_saved < num_occupied_frames and num_saved < len(empty_frames):
         output_path = os.path.join(output_dir, 'none', f'{filename}-{index}.jpg')
-        save_image(output_path, stationary_frames[num_saved])
+        save_image(output_path, empty_frames[num_saved])
         num_saved += 1
         index += 1
 
     vc.release()
+
+
+def get_avg_roi(roi_coords, path):
+    x1, y1, x2, y2 = roi_coords
+    
+    # Create a np array the same size as the ROI to use as an accumulator
+    avg = np.zeros((y2 - y1, x2 - x1, 3), dtype=float)
+    count = 0
+
+    # Sum each of the frames into the array
+    vc = cv2.VideoCapture(path)
+    while vc.isOpened():
+        ret, frame = vc.read()
+        if ret is False or frame is None:
+            break
+
+        roi = frame[y1:y2, x1:x2]
+        avg += roi
+        count += 1
+    
+    # Compute average and return
+    avg = avg / count
+    avg = avg.astype(np.uint8)
+
+    return avg
 
 
 def main():
@@ -118,32 +121,29 @@ def main():
         args['roi_y'] + args['roi_height']
     )
 
-    # Load pickled 'reference frame' info
-    ref_frame_indexes = {}
-    try:
-        with open('ref_frame_indexes.pickle', 'rb') as f:
-            ref_frame_indexes = pickle.load(f)
-    except:
-        pass
-
     # Loop over and process each training video
     paths = sorted(glob.glob(os.path.join(args['input'], '**/*.mp4')))
     for path in paths:
-        ref_frame = get_reference_frame(path, ref_frame_indexes, roi_coords)
-        if ref_frame is not None:
-            _, ref_roi = preprocess(ref_frame, roi_coords)
-        else:
-            ref_roi = None
+        # Extract the average frame from each video, to use for motion detection
+        avg_roi = get_avg_roi(roi_coords, path)
+
+        if args['preview']:
+            cv2.imshow(f'Average for {os.path.basename(path)}', avg_roi)
+            if cv2.waitKey(0) == ord('q'):
+                break
         
+        # Process the video to extract empty and occupied frames
         process_video(
             path,
             args['output'],
-            ref_roi,
+            avg_roi,
             roi_coords,
             args['moving_threshold'],
             args['still_threshold'],
             args['preview']
         )
+
+        cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':
