@@ -16,9 +16,8 @@ Their cat only visited twice before deciding our food just wasn't worth the effo
 
 ## What's in the Repository?
 
-- `TrainMobileNetClassifier` and `TrainHistogramClassifier` are Jupyter notebooks which can be used to train a Keras model and export it as a Tensorflow Lite model to be used with the classifier.
-- `src.utils` contains some shared OpenCV based image processing functions.
-- `src.training_generators.generate_images` can be used to extract training images from a directory of videos (organised by category) and save them to an output directory.
-- `src.training_generators.generate_histograms` can be used to extract training histograms from a directory of videos (organised by category) and save them to an output directory as a pandas dataframe.
-- `src.test_video` can be used to run the classifier against a specific video for testing.
-- `src.detector` is a multi-threaded process that captures frames from the camera, classifies them, and stores video of detected motion.
+- `TrainClassifier` is a Jupyter notebook which can be used to train a Keras model and export it as a Tensorflow Lite model to be used with the classifier.
+- `badcat.detector` is a multi-threaded process that captures frames from the camera, classifies them, and stores video of detected motion.
+- `badcat.generate_images` can be used to extract training images from a directory of videos (organised by category) and save them to an output directory.
+- `badcat.test_video` can be used to run the classifier against a specific video for testing.
+- `badcat.utils` contains some shared OpenCV based image processing functions.
