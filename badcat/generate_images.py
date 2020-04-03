@@ -3,7 +3,7 @@ import argparse, glob, os.path, pickle
 import cv2
 import numpy as np
 
-from .utils import extract_roi, preprocess_roi, extract_hull, display_preview
+from .utils import iter_frames, extract_hull
 
 
 def parse_args():
@@ -12,6 +12,7 @@ def parse_args():
     ap.add_argument('-o', '--output', default='train_images')
     ap.add_argument('-m', '--moving_threshold', type=float, default=0.15)
     ap.add_argument('-s', '--still_threshold', type=float, default=0.025)
+    ap.add_argument('--nth', type=int, default=5, help='only consider every Nth frame')
     ap.add_argument('--roi_x', type=int, default=160, help='the top-left X coordinate of the ROI')
     ap.add_argument('--roi_y', type=int, default=0, help='the top-left Y coordinate of the ROI')
     ap.add_argument('--roi_width', type=int, default=800, help='the width of the ROI')
@@ -26,34 +27,26 @@ def save_image(path, image):
     cv2.imwrite(path, image)
 
 
-def process_video(path, output_dir, avg_roi, roi_coords, moving_thresh, still_thresh, show_preview):
+def display_preview(roi, hull, hull_proportion):
+    output = cv2.cvtColor(roi, cv2.COLOR_GRAY2BGR)
+    output = cv2.putText(output, f'Hull proportion: {hull_proportion}', (5,25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255))
+    if hull is not None:
+        output = cv2.drawContours(output.copy(), [hull], -1, (0,0,255))
+    cv2.imshow('Output', output)
+    if cv2.waitKey(0) == ord('q'):
+        exit()
+
+
+def process_video(path, output_dir, avg_roi, roi_coords, moving_thresh, still_thresh, nth, show_preview):
     # Compute the base output path to use when saving frames
     category = path.split(os.sep)[-2]
     filename = os.path.splitext(os.path.basename(path))[0]
 
-    # Pre-process the averaged ROI
-    avg_roi = cv2.resize(avg_roi, (224, 224))
-    avg_roi = cv2.cvtColor(avg_roi, cv2.COLOR_BGR2GRAY)
-    avg_roi = cv2.GaussianBlur(avg_roi, (13, 13), 0)
-    avg_roi = cv2.equalizeHist(avg_roi)
-
     # Open the video and process each frame
-    index = 0
-
     num_occupied_frames = 0
     empty_frames = []
     
-    vc = cv2.VideoCapture(path)
-    while vc.isOpened():
-        # Read the next frame
-        ret, frame = vc.read()
-        if ret is False or frame is None:
-            break
-        
-        # Preprocess the frame
-        curr_roi = extract_roi(frame, roi_coords)
-        curr_roi, processed_curr_roi = preprocess_roi(curr_roi)
-
+    for index, curr_roi, processed_curr_roi in iter_frames(path, roi_coords, nth=nth):
         # Form a complex hull around the movement in the frame
         hull, hull_proportion = extract_hull(processed_curr_roi, avg_roi)
 
@@ -67,9 +60,6 @@ def process_video(path, output_dir, avg_roi, roi_coords, moving_thresh, still_th
 
         if show_preview:
             display_preview(curr_roi, hull, hull_proportion)
-
-        # Book keeping
-        index += 1
     
     # Save the frames where no movement occurred, but only enough to equal the number of 
     # frames where movement *did* occur.
@@ -82,25 +72,16 @@ def process_video(path, output_dir, avg_roi, roi_coords, moving_thresh, still_th
         num_saved += 1
         index += 1
 
-    vc.release()
-
 
 def get_avg_roi(roi_coords, path):
-    x1, y1, x2, y2 = roi_coords
-    
-    # Create a np array the same size as the ROI to use as an accumulator
-    avg = np.zeros((y2 - y1, x2 - x1, 3), dtype=float)
+    avg = None
     count = 0
 
     # Sum each of the frames into the array
-    vc = cv2.VideoCapture(path)
-    while vc.isOpened():
-        ret, frame = vc.read()
-        if ret is False or frame is None:
-            break
-
-        roi = frame[y1:y2, x1:x2]
-        avg += roi
+    for _, _, processed_roi in iter_frames(path, roi_coords):
+        if avg is None:
+            avg = np.zeros_like(processed_roi, dtype=np.float)
+        avg += processed_roi
         count += 1
     
     # Compute average and return
@@ -140,6 +121,7 @@ def main():
             roi_coords,
             args['moving_threshold'],
             args['still_threshold'],
+            args['nth'],
             args['preview']
         )
 

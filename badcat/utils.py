@@ -48,14 +48,32 @@ def extract_hull(curr_roi, prev_roi):
     return hull, hull_proportion
 
 
-def display_preview(roi, hull, hull_proportion):
-    output = cv2.cvtColor(roi, cv2.COLOR_GRAY2BGR)
-    output = cv2.putText(output, f'Hull proportion: {hull_proportion}', (5,25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255))
-    if hull is not None:
-        output = cv2.drawContours(output.copy(), [hull], -1, (0,0,255))
-    cv2.imshow('Output', output)
-    if cv2.waitKey(0) == ord('q'):
-        exit()
+def iter_frames(path, roi_coords, nth=1):
+    """Iterates over each frame in the video at `path` and yields an `(index, roi, processed_roi)` tuple for each.
+    
+    If `nth` is specified, only every nth frame will be yielded."""
+    index = 0
+    vc = cv2.VideoCapture(path)
+    while vc.isOpened():
+        # Read the next frame
+        ret, frame = vc.read()
+        if ret is False or frame is None:
+            break
+
+        # Skip all but the nth frames
+        if index % nth != 0:
+            index += 1
+            continue
+        
+        # Preprocess the frame
+        roi = extract_roi(frame, roi_coords)
+        roi, processed_roi = preprocess_roi(roi)
+
+        # Yield data
+        yield (index, roi, processed_roi)
+
+        # Book keeping
+        index += 1
 
 
 def __log(message, level, stream):

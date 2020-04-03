@@ -6,7 +6,7 @@ import numpy as np
 
 from tensorflow.contrib.lite.python.interpreter import Interpreter
 
-from ..utils import extract_roi, preprocess_roi, extract_hull, extract_histograms
+from .utils import iter_frames
 
 
 def parse_args():
@@ -14,7 +14,7 @@ def parse_args():
     ap.add_argument('--video', required=True, help='')
     ap.add_argument('--model', required=True, help='the tflite model to use for classification')
     ap.add_argument('--labels', required=True, help='the pickled labels file')
-    ap.add_argument('--nth', type=int, default=4, help='only consider every Nth frame')
+    ap.add_argument('--nth', type=int, default=5, help='only consider every Nth frame')
     ap.add_argument('--roi_x', type=int, default=160, help='the top-left X coordinate of the ROI')
     ap.add_argument('--roi_y', type=int, default=0, help='the top-left Y coordinate of the ROI')
     ap.add_argument('--roi_width', type=int, default=800, help='the width of the ROI')
@@ -47,24 +47,9 @@ def main():
     output_tensor_index = interpreter.get_output_details()[0]['index']
 
     # Open the video and process each frame
-    index = 0
     ys = collections.deque(maxlen=15)
 
-    vc = cv2.VideoCapture(args['video'])
-    while vc.isOpened():
-        # Read the next frame
-        ret, frame = vc.read()
-        if ret is False or frame is None:
-            break
-        
-        if index % args['nth'] != 0:
-            index += 1
-            continue
-
-        # Preprocess the full size frame
-        curr_roi = extract_roi(frame, roi_coords)
-        curr_roi, _ = preprocess_roi(curr_roi)
-
+    for index, curr_roi, _ in iter_frames(args['video'], roi_coords, nth=args['nth']):
         # Run the classifier and add the result to the set of recent predictions
         X = cv2.cvtColor(curr_roi, cv2.COLOR_GRAY2BGR)
         X = np.reshape(X, (1, *X.shape))
@@ -91,11 +76,6 @@ def main():
         cv2.imshow('Prediction', curr_roi)
         if cv2.waitKey(0) == ord('q'):
             break
-
-        # Book keeping for next frame
-        index += 1
-
-    vc.release()
 
 
 if __name__ == '__main__':
